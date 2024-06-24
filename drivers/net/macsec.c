@@ -388,8 +388,8 @@ static const struct macsec_ops *macsec_get_ops(struct macsec_dev *macsec,
 static bool macsec_validate_skb(struct sk_buff *skb, u16 icv_len, bool xpn)
 {
 	struct macsec_eth_header *h = (struct macsec_eth_header *)skb->data;
-	int len = skb->len - 2 * ETH_ALEN;
-	int extra_len = macsec_extra_len(!!(h->tci_an & MACSEC_TCI_SC)) + icv_len;
+	/* should not be computed before the absolute minimum length check */
+	int expected_skb_len;
 
 	/* a) It comprises at least 17 octets */
 	if (skb->len <= 16)
@@ -415,9 +415,17 @@ static bool macsec_validate_skb(struct sk_buff *skb, u16 icv_len, bool xpn)
 		return false;
 
 	/* length check, f) g) h) i) */
-	if (h->short_length)
-		return len == extra_len + h->short_length;
-	return len >= extra_len + MIN_NON_SHORT_LEN;
+	if (h->short_length) {
+		expected_skb_len = 2 * ETH_ALEN + macsec_extra_len(!!(h->tci_an & MACSEC_TCI_SC)) + h->short_length + icv_len;
+		if (skb->len < expected_skb_len)
+			return false;
+		if (skb->len == expected_skb_len)
+			return true;
+		/* trim any Short Length padding */
+		return ((skb->len = expected_skb_len));
+	}
+	expected_skb_len = 2 * ETH_ALEN + macsec_extra_len(!!(h->tci_an & MACSEC_TCI_SC)) + MIN_NON_SHORT_LEN + icv_len;
+	return skb->len >= expected_skb_len;
 }
 
 #define MACSEC_NEEDED_HEADROOM (macsec_extra_len(true))
